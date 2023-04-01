@@ -1,0 +1,275 @@
+---
+title: "NYPD_shootings"
+author: "Kamila Kussainova"
+date: "2023-03-23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(tidyr)
+library(knitr)
+library(dplyr)
+```
+Using the following libraries: tidyverse, lubridate, tidyr, knitr, dplyr
+
+## Introduction
+The NYPD collects and releases data on all reported crimes in the city. In this project, I will be analyzing a subset of this data which contains information about shootings that occurred in New York City from 2006 to 2020. My aim is to explore and visualize the patterns in the data to gain insights into the frequency and distribution of shootings over time. I will be using the R programming language and several data visualization libraries such as ggplot2 to create a variety of plots that will help us better understand this data.
+Specifically, I will attempt answer the following questions:
+
+* What are the trends in NYPD shooting incidents over time? 
+* Are there certain times of year/days of the week/ times of day that are associated with higher rates of shootings? 
+  + How many of those shootings result in death?
+
+
+## Step 1: Import Data
+The first step is to import the data directly from the online source using its URL. 
+The dataset contains 19 columns and 25596 rows, with each row representing a single documented shooting incident. The columns provide various details about the incident, including the date and time, precint and jurisdiction numbers, location (borough, zip code, latitude, and longitude), whetherthe shooting resulted in a victim's death, as weel as information about the perpetrator and the victim.
+
+
+```{r creating_urls}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_data <- read.csv(url_in)
+summary(nypd_data)
+```
+
+## Step 2: Tidy and Transform Data
+For the purposes of answering the above-mentioned questions, we only need to leave the variables pertaining to the occurrence date and time, borough in which it took place, and whether the victim survived. I also need to format the date, time and murder flag variables.
+
+1. Change the date and time formats:
+```{r changing_date_time}
+nypd_data <- nypd_data %>%
+# Convert dates and times to proper format
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE),
+         OCCUR_TIME = hms(OCCUR_TIME))
+```
+2. Convert statistical murder flag from character format to logical:
+```{r convert_to_logical}
+nypd_data <- nypd_data %>%
+  mutate(STATISTICAL_MURDER_FLAG =as.logical(STATISTICAL_MURDER_FLAG) )
+
+```
+As to prepare for the visualization part, we will now create the new variables by which they will be grouped while plotting.
+3. create new variables:
+```{r creating_variables}
+nypd_data <- nypd_data %>%
+# Create new variables for year, month, and day of week
+  mutate(YEAR = year(OCCUR_DATE),
+         MONTH = month(OCCUR_DATE),
+         WEEKDAY = wday(OCCUR_DATE, label = TRUE),
+         HOUR = hour(OCCUR_TIME)
+)
+```
+4. Drop the rows with missing variables and the variables that are not needed:
+```{r droping_missing}
+nypd_data <- nypd_data %>%
+  drop_na()
+nypd_data <- nypd_data %>%
+  select(-c(PRECINCT, JURISDICTION_CODE, LOCATION_DESC, LOCATION_DESC, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE, X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat))
+
+```
+5. Print a summary:
+```{r}
+summary(nypd_data)
+```
+## Step 3: Add visualizations and analysis
+1. What are the trends in NYPD shooting incidents over time? 
+
+```{r}
+shootings_per_year <- nypd_data %>%
+  group_by(YEAR) %>%
+  summarize(total_count = n(),
+            murder_count = sum(STATISTICAL_MURDER_FLAG == TRUE)) 
+
+ggplot(shootings_per_year, aes(x = YEAR, y = total_count)) +
+  geom_line(color = "dodgerblue") +
+  geom_line(aes(y = murder_count), color = "red") +
+#set the values that show up on x axis
+  scale_x_continuous(breaks = seq(min(shootings_per_year$YEAR), max(shootings_per_year$YEAR), by = 1)) +
+#set the values that show up on y axis
+  scale_y_continuous(breaks = seq(0, max(shootings_per_year$total_count), by = 100)) +
+#name the table and the axes
+  labs(title = "Total Shootings Per Year",
+       x = "Year",
+       y = "Number of Shootings") +
+  #trying to add a legend
+  scale_color_manual(values = c("dodgerblue", "red"), 
+                     labels = c("Total Shootings", "Murder Flagged Shootings"))
+
+```
+```{r, eval =TRUE, include=TRUE}
+
+# group data by year and summarize total shootings and shootings resulting in murder
+shootings_by_year <- nypd_data %>%
+  group_by(year = year(OCCUR_DATE)) %>%
+  summarize(total_shootings = n(),
+            shootings_resulting_in_murder = sum(STATISTICAL_MURDER_FLAG)) 
+
+# calculate percentage of murders that resulted in death for each year
+shootings_by_year <- shootings_by_year %>%
+  mutate(percentage_murders_resulting_in_death = 
+           100 * shootings_resulting_in_murder / total_shootings)
+
+# view the results
+knitr::kable(shootings_by_year)
+```
+
+In the graph above the blue line indicates the total shootings, while the red line shows the number of incidents that are flagged as a statistical murder. The graph indicates that there was a general downward trend in the number of shootings from 2006 to around 2017, after which the numbers held steady for 2 years. However, the number of shootings soared in 2019 and 2020, rising to 1948 shootings that year. Interestingly, the number of shootings resulting in the victim's death did not follow the same patterns, remaining under 450 incidents per year. As seen from the table, while the overall number of shootings increased during this period, the proportion of shootings resulting in a victim's death fluctuated.
+
+2. Are there certain times of year that are associated with higher rates of shootings?
+  + Are there certain times of year that are associated with higher rates of shootings resulting in death?
+
+```{r plot2}
+#calculate the total number of shootings that occurred in each month of the year
+shootings_by_month <- nypd_data %>%
+  group_by(MONTH) %>%
+  summarize(count = n())
+#calculate the total number of shootings that occurred in each month of the year and resulted in death
+shootings_by_month_murder <- nypd_data %>%
+  filter(STATISTICAL_MURDER_FLAG == TRUE) %>%
+  group_by(MONTH) %>%
+  summarize(count = n())
+#join data frames by the common column month
+shootings_by_month_combined <- left_join(shootings_by_month, shootings_by_month_murder, by = "MONTH")
+#rename the columns
+colnames(shootings_by_month_combined) <- c("MONTH", "Total", "Murder")
+
+ggplot(shootings_by_month_combined, aes(x = MONTH)) +
+  geom_bar(aes(y = Total), stat = "identity", fill = "dodgerblue") +
+  geom_bar(aes(y = Murder), stat = "identity", fill = "red") +
+#name the table and the axes
+  labs(title = "Total Number of Shootings by Month",
+       x = "Month",
+       y = "Number of Shootings") +
+#set what shows up on the x axis
+  scale_x_continuous(breaks = 1:12, labels = month.name)+
+#rotate the text
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+```{r, eval =TRUE, include=TRUE}
+
+# group data by year and summarize total shootings and shootings resulting in murder
+shootings_by_month <- nypd_data %>%
+  group_by(month = month(OCCUR_DATE)) %>%
+  summarize(total_shootings = n(),
+            shootings_resulting_in_murder = sum(STATISTICAL_MURDER_FLAG)) 
+
+# calculate percentage of murders that resulted in death for each year
+shootings_by_month <- shootings_by_month %>%
+  mutate(percentage_murders_resulting_in_death = 
+           100 * shootings_resulting_in_murder / total_shootings)
+
+# view the results
+knitr::kable(shootings_by_month)
+```
+
+Based on this graph, it appears that there are certain times of the year associated with higher rates of shootings. There seems to be a slight increase in the number of shootings during the summer months, particularly in July and August. The number of shootings then decreases in the fall and winter months.
+
+When it comes to shootings resulting in death, the graph shows that there is a similar pattern with a slight increase during the summer months, particularly in July, and then a decrease throughout the rest of the year. December stands out with the highest number of shootings in non-summer months, closely followed by January's results. However, it is important to note that the proportion of the number of shootings resulting in death to the total number of shootings fluctuates between 17 and 23 percent.
+There could be various reasons for this trend. One possible explanation is that warmer weather in summer leads to more people gathering outdoors and staying out later, which could increase the likelihood of conflicts and violence. Additionally, summer is often associated with vacations and increased alcohol consumption, which could also contribute to more violent incidents. Another possibility is that police resources may be stretched thin during summer months, making it more difficult to prevent and respond to violent incidents. However, it's important to note that this is just speculation and further research would be needed to understand the underlying causes of this trend.
+
+3. Are there certain days of the week that are associated with higher rates of shootings?
+  + Are there certain days of the week that are associated with higher rates of shootings resulting in death?
+
+```{r plot3}
+#calculate the total number of shootings that occurred in each day of the week
+shootings_by_day <- nypd_data %>%
+  group_by(WEEKDAY) %>%
+  summarize(count = n())
+#calculate the total number of shootings that occurred in each day of the week resulting in death
+shootings_by_day_murder <- nypd_data %>%
+  filter(STATISTICAL_MURDER_FLAG == TRUE) %>%
+  group_by(WEEKDAY) %>%
+  summarize(count = n())
+#join data frames by the common column Weekday
+shootings_by_day_combined <- left_join(shootings_by_day, shootings_by_day_murder, by = "WEEKDAY")
+colnames(shootings_by_day_combined) <- c("WEEKDAY", "Total", "Murder")
+
+ggplot(shootings_by_day_combined, aes(x = WEEKDAY)) +
+  geom_bar(aes(y = Total), stat = "identity", fill = "dodgerblue") +
+  geom_bar(aes(y = Murder), stat = "identity", fill = "red") +
+#name the plot and the axes
+  labs(title = "Total Number Shootings by Day of Week",
+       x = "Days of the week",
+       y = "Number of Shootings") +
+#set what shows up on x axis
+  scale_x_discrete(labels = c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))
+```
+```{r, eval =TRUE, include=FALSE}
+
+# group data by year and summarize total shootings and shootings resulting in murder
+shootings_by_weekday <- nypd_data %>%
+  group_by(WEEKDAY) %>%
+  summarize(total_shootings = n(),
+            shootings_resulting_in_murder = sum(STATISTICAL_MURDER_FLAG)) 
+
+# calculate percentage of murders that resulted in death for each year
+shootings_by_weekday <- shootings_by_weekday %>%
+  mutate(percentage_murders_resulting_in_death = 
+           100 * shootings_resulting_in_murder / total_shootings)
+
+# view the results
+knitr::kable(shootings_by_weekday)
+```
+
+Based on the graph, the number of shootings appears to be highest on Saturdays and Sundays, followed by Mondays and Fridays. The number of shootings resulting in murder seems to be fairly consistent throughout the rest work week.
+There could be several possible explanations for this pattern, most of them being the same as the ones explaining why the number of shootings soars in the summertime.
+
+4. Are there certain times in the day that are associated with higher rates of shootings?
+  + Are there certain times in the day that are associated with higher rates of shootings resulting in death?
+```{r plot4}
+#calculate the total number of shootings that occurred in each hour of the day
+shootings_by_hour <- nypd_data %>%
+  group_by(HOUR) %>%
+  summarize(count = n())
+#calculate the total number of shootings that occurred in each hour of the day resulting in death
+shootings_by_hour_murder <- nypd_data %>%
+  filter(STATISTICAL_MURDER_FLAG == TRUE) %>%
+  group_by(HOUR) %>%
+  summarize(count = n())
+#join data frames by the common column Hour
+shootings_by_hour_combined <- left_join(shootings_by_hour, shootings_by_hour_murder, by = "HOUR")
+colnames(shootings_by_hour_combined) <- c("HOUR", "Total", "Murder")
+
+ggplot(shootings_by_hour_combined, aes(x = HOUR)) +
+  geom_bar(aes(y = Total), stat = "identity", fill = "dodgerblue") +
+  geom_bar(aes(y = Murder), stat = "identity", fill = "red") +
+#name the plot an dthe axes
+  labs(title = "Total Number Shootings by Hour of the Day",
+       x = "Hour of the Day",
+       y = "Number of Shootings") +
+  scale_x_continuous(breaks = seq(0, 23, 1), labels = seq(0, 23, 1))
+
+```
+```{r, eval =TRUE, include=TRUE}
+
+# group data by year and summarize total shootings and shootings resulting in murder
+shootings_by_hour <- nypd_data %>%
+  group_by(HOUR) %>%
+  summarize(total_shootings = n(),
+            shootings_resulting_in_murder = sum(STATISTICAL_MURDER_FLAG)) 
+
+# calculate percentage of murders that resulted in death for each year
+shootings_by_hour <- shootings_by_hour %>%
+  mutate(percentage_murders_resulting_in_death = 
+           100 * shootings_resulting_in_murder / total_shootings)
+
+# view the results
+knitr::kable(shootings_by_hour)
+```
+The graph above shows the average number of shootings by hour of the day. As expected, the graph shows that the number of shootings increases during the evening and nighttime hours, with the peak occurring between 8pm and midnight. There is a gradual decrease in the number of shootings after midnight until the early morning hours, where it reaches its lowest point between 6 am and 10 am.
+
+When looking at shootings resulting in murder specifically, the graph shows a similar pattern, but the peak occurs slightly later, being highest at 10 pm. Interestingly, the deadliest shootings occur at 7 am, while the ones occurring at 11 pm are the least deadly.
+
+Possible explanations for the increase in shootings during the evening and nighttime hours include increased alcohol consumption and partying during those hours, higher rates of gang activity, and the cover of darkness providing more opportunities for criminal activity. Additionally, factors such as reduced police presence and fewer witnesses during nighttime hours may also contribute to the increase in shootings.
+
+## Project Step 4: Add Bias Identification
+In conclusion, this analysis of the NYPD shooting incidents has revealed several key findings regarding the frequency and distribution of shootings in New York City. It revealed an overall decrease in the number of shootings from 2006 to 2017, followed by a decline with a sharp increase in 2020. Although the total number of shootings rose during this period, the proportion of shootings resulting in a victim's death did not change significantly. The analysis also found that the number of shootings tends to increase during certain times of the year, week and day.
+
+It is important to acknowledge the potential limitations and sources of bias in this analysis. One possible source of bias is the fact that the data only includes reported shootings, which may not accurately reflect the true number of incidents, especially those that go unreported or undetected. Furthermore, our analysis is restricted by the variables included in the dataset, and there may be other important factors that contribute to gun violence that we did not account for.
+
+One of my personal biases that can affect this research is interpretation bias. Essentially, the possible explanations that I provided in my analysis are influenced by my personal beliefs and experiences. To address this, I utilized objective measures and data visualization tools to attempt presenting the findings in a neutral and unbiased manner.This bias can be mitigated by further research, such as regression model that closes the backdoors by incorporating additional factors that could explain the sharp increases in gun violence during certain times. 
+
+Overall, this analysis provides valuable insights into the patterns and trends of gun violence in New York City and can inform policies and interventions aimed at reducing gun violence in the city. Nonetheless, further research and analysis are necessary to fully comprehend its underlying.
